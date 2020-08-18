@@ -12,7 +12,9 @@ using namespace utils;
 
 namespace chipmachine {
 
-MusicPlayerList::MusicPlayerList(const utils::path& workDir) : mp(workDir.string())
+MusicPlayerList::MusicPlayerList(MusicDatabase& mdb, RemoteLoader& rl,
+                                 AudioPlayer& ap)
+    : mp(ap), remoteLoader(rl), musicDatabase(mdb)
 {
     playerThread = std::thread([=] {
         while (!quitThread) {
@@ -29,6 +31,20 @@ MusicPlayerList::MusicPlayerList(const utils::path& workDir) : mp(workDir.string
             sleepms(50);
         }
     });
+}
+
+void MusicPlayerList::wait()
+{
+    if (funcs.empty()) {
+        onThisThread([=] {});
+    }
+    plMutex.lock();
+    while (!funcs.empty()) {
+        plMutex.unlock();
+        sleepms(1);
+        plMutex.lock();
+    }
+    plMutex.unlock();
 }
 
 void MusicPlayerList::addSong(const SongInfo& si, bool shuffle)
@@ -85,30 +101,30 @@ void MusicPlayerList::seek(int song, int seconds)
     });
 }
 
-SongInfo MusicPlayerList::getInfo(int index)
+SongInfo MusicPlayerList::getInfo(int index) const
 {
     LOCK_GUARD(plMutex);
     if (index == 0) return currentInfo;
     return playList.getSong(index - 1);
 }
 
-SongInfo MusicPlayerList::getDBInfo()
+SongInfo MusicPlayerList::getDBInfo() const
 {
     LOCK_GUARD(plMutex);
     return dbInfo;
 }
 
-int MusicPlayerList::getLength()
+int MusicPlayerList::getLength() const
 {
     return playerLength;
 }
 
-int MusicPlayerList::getPosition()
+int MusicPlayerList::getPosition() const
 {
     return playerPosition;
 }
 
-int MusicPlayerList::listSize()
+int MusicPlayerList::listSize() const
 {
     LOCK_GUARD(plMutex);
     return playList.size();
@@ -130,7 +146,7 @@ bool MusicPlayerList::handlePlaylist(const std::string& fileName)
 {
 
     playList.clear();
-    File f{fileName};
+    File f{ fileName };
 
     auto lines = f.getLines();
 
@@ -145,7 +161,7 @@ bool MusicPlayerList::handlePlaylist(const std::string& fileName)
 
     if (playList.size() == 0) return false;
 
-    MusicDatabase::getInstance().lookup(playList.front());
+    musicDatabase.lookup(playList.front());
     if (playList.front().path == "") {
         LOGD("Could not lookup '%s'", playList.front().path);
         errors.emplace_back("Bad song in playlist");
@@ -161,7 +177,7 @@ bool MusicPlayerList::playFile(utils::path fileName)
     if (fileName == "") return false;
     auto ext = toLower(fileName.extension());
     if (ext == ".pls" || currentInfo.format == "PLS") {
-        File f{fileName};
+        File f{ fileName };
 
         auto lines = f.getLines();
         std::vector<std::string> result;
@@ -174,7 +190,7 @@ bool MusicPlayerList::playFile(utils::path fileName)
         return false;
 
     } else if (ext == ".m3u" || currentInfo.format == "M3U") {
-        File f{fileName};
+        File f{ fileName };
 
         auto lines = f.getLines();
 
@@ -223,7 +239,7 @@ bool MusicPlayerList::playFile(utils::path fileName)
 
 void MusicPlayerList::cancelStreaming()
 {
-    RemoteLoader::getInstance().cancel();
+    remoteLoader.cancel();
     mp.clearStreamFifo();
 }
 void MusicPlayerList::update()
@@ -233,11 +249,12 @@ void MusicPlayerList::update()
 
     mp.update();
 
-    RemoteLoader::getInstance().update();
+    remoteLoader.update();
 
     if (state == Playnow) {
         SET_STATE(Started);
-        // LOGD("##### PLAY NOW: %s (%s)", currentInfo.path, currentInfo.title);
+        // LOGD("##### PLAY NOW: %s (%s)", currentInfo.path,
+        // currentInfo.title);
         multiSongs.clear();
         playedNext = false;
         playCurrent();
@@ -304,7 +321,7 @@ void MusicPlayerList::update()
 
         if (playList.size() > 0) {
             // Update info for next song from
-            MusicDatabase::getInstance().lookup(playList.front());
+            musicDatabase.lookup(playList.front());
         }
 
         // pos = 0;
@@ -356,7 +373,7 @@ void MusicPlayerList::playCurrent()
 
     if (prefix == "index") {
         int index = stol(path);
-        dbInfo = currentInfo = MusicDatabase::getInstance().getSongInfo(index);
+        dbInfo = currentInfo = musicDatabase.getSongInfo(index);
         auto parts = split(currentInfo.path, "::", 2);
         if (parts.size() == 2) {
             prefix = parts[0];
@@ -368,8 +385,7 @@ void MusicPlayerList::playCurrent()
     if (prefix == "product") {
         auto id = stol(path);
         playList.psongs.clear();
-        for (const auto& song :
-             MusicDatabase::getInstance().getProductSongs(id)) {
+        for (const auto& song : musicDatabase.getProductSongs(id)) {
             playList.psongs.push_back(song);
         }
         if (playList.psongs.empty()) {
@@ -380,7 +396,7 @@ void MusicPlayerList::playCurrent()
         }
 
         // Check that the first song is working
-        MusicDatabase::getInstance().lookup(playList.psongs.front());
+        musicDatabase.lookup(playList.psongs.front());
         if (playList.psongs.front().path == "") {
             LOGD("Could not lookup '%s'", playList.psongs.front().path);
             errors.emplace_back("Bad song in product");
@@ -391,8 +407,7 @@ void MusicPlayerList::playCurrent()
         return;
     } else {
         if (currentInfo.metadata[SongInfo::SCREENSHOT] == "") {
-            auto s =
-                MusicDatabase::getInstance().getSongScreenshots(currentInfo);
+            auto s = musicDatabase.getSongScreenshots(currentInfo);
             currentInfo.metadata[SongInfo::SCREENSHOT] = s;
         }
     }
@@ -435,7 +450,7 @@ void MusicPlayerList::playCurrent()
 
     if (utils::exists(currentInfo.path)) {
         LOGD("PLAYING LOCAL FILE %s", currentInfo.path);
-        songFiles = {File(currentInfo.path)};
+        songFiles = { File(currentInfo.path) };
         loadedFile = currentInfo.path;
         files = 0;
         return;
@@ -443,7 +458,6 @@ void MusicPlayerList::playCurrent()
 
     loadedFile = "";
     files = 0;
-    RemoteLoader& loader = RemoteLoader::getInstance();
 
     std::string cueName = "";
     if (prefix == "bitjam")
@@ -456,7 +470,7 @@ void MusicPlayerList::playCurrent()
             ".cue");
 
     if (cueName != "") {
-        loader.load(cueName, [=](File cuefile) {
+        remoteLoader.load(cueName, [=](File cuefile) {
             if (cuefile) cueSheet = std::make_shared<CueSheet>(cuefile);
         });
     }
@@ -474,23 +488,24 @@ void MusicPlayerList::playCurrent()
             SET_STATE(Playstarted);
             LOGD("Stream start");
             std::string name = currentInfo.path;
-            loader.stream(currentInfo.path,
-                          [=](int what, const uint8_t* ptr, int n) -> bool {
-                              if (what == RemoteLoader::PARAMETER) {
-                                  mp.setParameter((char*)ptr, n);
-                              } else {
-                                  // LOGD("Writing to %s", name);
-                                  mp.putStream(ptr, n);
-                              }
-                              return true;
-                          });
+            remoteLoader.stream(
+                currentInfo.path,
+                [=](int what, const uint8_t* ptr, int n) -> bool {
+                    if (what == RemoteLoader::PARAMETER) {
+                        mp.setParameter((char*)ptr, n);
+                    } else {
+                        // LOGD("Writing to %s", name);
+                        mp.putStream(ptr, n);
+                    }
+                    return true;
+                });
         }
         return;
     }
 
     // LOGD("LOADING:%s", currentInfo.path);
     files++;
-    loader.load(currentInfo.path, [=](File f0) {
+    remoteLoader.load(currentInfo.path, [=](File f0) {
         if (!f0) {
             errors.emplace_back("Could not load file");
             SET_STATE(Error);
@@ -499,7 +514,7 @@ void MusicPlayerList::playCurrent()
         }
         songFiles.push_back(f0);
         loadedFile = f0.getName();
-        //auto ext = toLower(path_extension(loadedFile));
+        // auto ext = toLower(path_extension(loadedFile));
         LOGD("Loaded file '%s'", loadedFile);
         auto parentDir = File(path_directory(loadedFile));
         auto fileList = mp.getSecondaryFiles(f0);
@@ -507,9 +522,9 @@ void MusicPlayerList::playCurrent()
             File target = parentDir / s;
             if (!target.exists()) {
                 files++;
-                RemoteLoader& loader = RemoteLoader::getInstance();
+                RemoteLoader& loader = remoteLoader;
                 auto url = path_directory(currentInfo.path) + "/" + s;
-                loader.load(url, [=](File f) {
+                remoteLoader.load(url, [=](File f) {
                     if (!f) {
                         errors.emplace_back("Could not load file");
                         SET_STATE(Error);

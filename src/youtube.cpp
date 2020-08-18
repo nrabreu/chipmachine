@@ -1,7 +1,7 @@
+#include <coreutils/log.h>
+#include <coreutils/utils.h>
 #include <memory>
 #include <musicplayer/chipplugin.h>
-#include <coreutils/utils.h>
-#include <coreutils/log.h>
 #include <string>
 
 #include "../sol2/sol.hpp"
@@ -43,5 +43,5 @@ public:
 
 void initYoutube(sol::state& lua)
 {
-    musix::ChipPlugin::addPlugin(std::make_shared<YoutubePlugin>(lua));
+    musix::ChipPlugin::addPlugin(std::make_shared<YoutubePlugin>(lua), true);
 }

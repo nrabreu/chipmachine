@@ -2,13 +2,22 @@
 
 #include "src/MusicDatabase.h"
 #include "src/MusicPlayer.h"
-
+#include "src/MusicPlayerList.h"
+#include "src/RemoteLoader.h"
 #include "src/modutils.h"
 
+#include "src/di.hpp"
+namespace di = boost::di;
+
+#include <audioplayer/audioplayer.h>
 #include <coreutils/log.h>
 #include <musicplayer/chipplugin.h>
-#include <string>
+#include <musicplayer/plugins/plugins.h>
+
+#include <algorithm>
 #include <array>
+#include <numeric>
+#include <string>
 
 TEST_CASE("modutils", "[machine]")
 {
@@ -32,47 +41,96 @@ TEST_CASE("modutils", "[machine]")
                         "2fChris Huelsbeck%2fmdat.apidya (level 3)") == "mdat");
 }
 
-TEST_CASE("music database", "")
+TEST_CASE("music database", "[database]")
 {
     using namespace chipmachine;
+    const auto injector = di::make_injector(di::bind<utils::path>.to("."));
 
-    auto& mdb = MusicDatabase::getInstance();
-    REQUIRE(mdb.initFromLua(utils::path(".")) == true);
-    auto q = mdb.createQuery();
+    auto mdb = injector.create<std::unique_ptr<MusicDatabase>>();
+    REQUIRE(mdb->initFromLua(utils::path(".")) == true);
+    auto q = mdb->createQuery();
 }
 
-TEST_CASE("music player", "")
+struct AudioPlayerNull : public AudioPlayer
 {
-    chipmachine::MusicPlayer mp{"."};
-    mp.playFile("music/Amiga/Nuke - Loader.mod");
-    mp.update();
+    std::function<void(int16_t*, int)> callback;
+    virtual void play(std::function<void(int16_t*, int)> cb) override
+    {
+        callback = cb;
+    }
+
+    void get(std::vector<int16_t>& target)
+    {
+        callback(&target[0], target.size());
+    }
+
+    void seek(int seconds)
+    {
+        std::array<int16_t, 44100 * 2> dummy;
+        while (seconds--) {
+            callback(dummy.data(), dummy.size());
+        }
+    };
+};
+
+TEST_CASE("musicplayerlist", "")
+{
+    logging::setLevel(logging::Level::Debug);
+    AudioPlayerNull ap{};
+    const auto injector = di::make_injector(di::bind<utils::path>.to("."),
+                                            di::bind<AudioPlayer>.to(ap));
+    musix::ChipPlugin::createPlugins("data");
+    auto mpl = injector.create<std::unique_ptr<chipmachine::MusicPlayerList>>();
+    mpl->addSong("music/Amiga/Starbuck - Tennis.mod"s);
+    mpl->addSong("music/Amiga/Dr.Awesome - Intromusic3.mod"s);
+    mpl->nextSong();
+    mpl->wait();
+    auto state = mpl->getState();
+    auto info = mpl->getInfo();
+    LOGI("%s %s %d", info.title, info.path, state);
+    ap.seek(150);
+    mpl->wait();
+    info = mpl->getInfo();
+    LOGI("%s %s %d", info.title, info.path, state);
 }
-#include <musicplayer/plugins/plugins.h>
-#include <numeric>
+
+TEST_CASE("musicplayer", "")
+{
+    AudioPlayerNull ap{};
+    const auto injector = di::make_injector(di::bind<utils::path>.to("."),
+                                            di::bind<AudioPlayer>.to(ap));
+    musix::ChipPlugin::createPlugins("data");
+    chipmachine::MusicPlayer mp{ ap };
+    bool ok = mp.playFile("music/Amiga/Nuke - Loader.mod");
+    REQUIRE(ok);
+    mp.update();
+    std::vector<int16_t> data(8192);
+    ap.get(data);
+    auto sum = std::accumulate(data.begin(), data.end(), (int64_t)0);
+    REQUIRE(sum != 0);
+}
 
 template <typename PLUGIN, typename... ARGS>
-bool testPlugin(std::string const& dir, std::string const& exclude, const ARGS&... args)
+bool testPlugin(std::string const& dir, std::string const& exclude,
+                const ARGS&... args)
 {
     std::array<int16_t, 8192> buffer;
-    PLUGIN plugin{args...};
-	printf("---- %s ----\n", plugin.name().c_str());
+    PLUGIN plugin{ args... };
+    printf("---- %s ----\n", plugin.name().c_str());
     logging::setLevel(logging::Level::Warning);
-    for (auto f : utils::File{dir}.listFiles()) {
-		if(exclude != "" && f.getName().find(exclude) != std::string::npos)
-			continue;
+    for (auto f : utils::File{ dir }.listFiles()) {
+        if (exclude != "" && f.getName().find(exclude) != std::string::npos)
+            continue;
 
         int64_t sum = 0;
         printf("Trying %s\n", f.getName().c_str());
         auto* player = plugin.fromFile(f.getName());
         if (player) {
-            //puts("Player created");
-			int count = 15;
+            int count = 15;
             while (sum == 0 && count != 0) {
                 int rc = player->getSamples(&buffer[0], buffer.size());
-                // REQUIRE(rc > 0);
                 if (rc > 0) {
                     sum = std::accumulate(&buffer[0], &buffer[rc], (int64_t)0);
-                    // REQUIRE(sum != 0);
                     if (sum != 0) {
                         break;
                     }
@@ -82,11 +140,8 @@ bool testPlugin(std::string const& dir, std::string const& exclude, const ARGS&.
             }
             delete player;
         }
-        printf("#### Playing %s : %s\n", f.getName().c_str(), 
-                player ?
-                (sum == 0 ? "NO SOUND" : "OK")
-                : "FAILED"
-                );
+        printf("#### Playing %s : %s\n", f.getName().c_str(),
+               player ? (sum == 0 ? "NO SOUND" : "OK") : "FAILED");
     }
     return true;
 }

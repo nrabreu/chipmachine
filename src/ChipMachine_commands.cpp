@@ -58,7 +58,7 @@ void ChipMachine::setupCommands()
                 fileName = utils::format("%s - %s.%s", composer, title, ext);
             auto to = target / fileName;
             LOGD("Downloading to '%s'", to.string());
-            if(!utils::copy(from, to)) {
+            if (!utils::copy(from, to)) {
                 to = target / from.filename();
                 utils::copy(from, to);
             }
@@ -92,11 +92,9 @@ void ChipMachine::setupCommands()
         auto song = dbInfo;
         song.starttune = currentTune;
         if (isFavorite) {
-            MusicDatabase::getInstance().removeFromPlaylist(currentPlaylistName,
-                                                            song);
+            musicDatabase.removeFromPlaylist(currentPlaylistName, song);
         } else {
-            MusicDatabase::getInstance().addToPlaylist(currentPlaylistName,
-                                                       song);
+            musicDatabase.addToPlaylist(currentPlaylistName, song);
         }
         isFavorite = !isFavorite;
         uint32_t alpha = isFavorite ? 0xff : 0x00;
@@ -107,8 +105,7 @@ void ChipMachine::setupCommands()
 
     cmd("add_list_favorite", [=] {
         if (haveSelection())
-            MusicDatabase::getInstance().addToPlaylist(currentPlaylistName,
-                                                       getSelectedSong());
+            musicDatabase.addToPlaylist(currentPlaylistName, getSelectedSong());
     });
 
     cmd("clear_filter", [=] {
@@ -245,13 +242,13 @@ void ChipMachine::setupCommands()
             LOGD("%s", res);
             auto parts = utils::split(res, "\t");
 
-            int f = atoi(parts[3].c_str()) & 0xff;
+            int f = atoi(parts[3]) & 0xff;
             if (f == PLAYLIST) continue;
 
             SongInfo song;
             song.title = parts[0];
             song.composer = parts[1];
-            song.path = "index::" + parts[2];
+            song.path = std::string("index::") + parts[2];
             player.addSong(song, true);
         }
         showScreen(MAIN_SCREEN);

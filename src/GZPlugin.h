@@ -4,17 +4,23 @@
 
 namespace chipmachine {
 
-class GZPlugin : public musix::ChipPlugin {
+class GZPlugin : public musix::ChipPlugin
+{
 public:
-	GZPlugin() {}
-	GZPlugin(std::vector<std::shared_ptr<musix::ChipPlugin>> &plugins) : plugins(plugins) {}
-	virtual std::string name() const override { return "GZPlugin"; }
-	virtual musix::ChipPlayer *fromFile(const std::string &fileName) override;
+    GZPlugin() = default;
+    explicit GZPlugin(std::vector<std::shared_ptr<musix::ChipPlugin>>& plugins)
+        : plugins(plugins)
+    {}
+    [[nodiscard]] virtual std::string name() const override
+    {
+        return "GZPlugin";
+    }
+    musix::ChipPlayer* fromFile(const std::string& fileName) override;
 
-	virtual bool canHandle(const std::string &name) override;
+    bool canHandle(const std::string& name) override;
 
 private:
-	std::vector<std::shared_ptr<musix::ChipPlugin>> plugins;
+    std::vector<std::shared_ptr<musix::ChipPlugin>> plugins;
 };
 
-}
+} // namespace chipmachine

@@ -1,29 +1,24 @@
 #pragma once
 
+#include "Dialog.h"
+#include "LineEdit.h"
+#include "MusicBars.h"
 #include "MusicDatabase.h"
 #include "MusicPlayerList.h"
 #include "SongInfoField.h"
-#include "TextField.h"
-
 #include "TelnetInterface.h"
-
+#include "TextField.h"
 #include "state_machine.h"
-#include <grappix/gui/renderset.h>
-
-#include <fft/spectrum.h>
-
-#include "Dialog.h"
-#include "LineEdit.h"
-
-#include "MusicBars.h"
 
 #include "../demofx/Scroller.h"
 #include "../demofx/StarField.h"
-
 #include "../sol2/sol.hpp"
+
 #include <coreutils/utils.h>
+#include <fft/spectrum.h>
 #include <grappix/grappix.h>
 #include <grappix/gui/list.h>
+#include <grappix/gui/renderset.h>
 #include <tween/tween.h>
 
 #include <cstdio>
@@ -95,7 +90,8 @@ public:
     void renderCommand(grappix::Rectangle& rec, int y, uint32_t index,
                        bool hilight);
 
-    ChipMachine(utils::path const& workDir);
+    ChipMachine(utils::path const& workDir, RemoteLoader& rl,
+                MusicPlayerList& mpl, MusicDatabase& mdb);
     ~ChipMachine();
 
     void initLua();
@@ -213,7 +209,9 @@ private:
 
     utils::path workDir;
 
-    MusicPlayerList player;
+    RemoteLoader& remoteLoader;
+    MusicPlayerList& player;
+    MusicDatabase& musicDatabase;
 
     Screen lastScreen = MAIN_SCREEN;
     Screen currentScreen = MAIN_SCREEN;

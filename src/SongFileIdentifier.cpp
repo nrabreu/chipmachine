@@ -5,6 +5,7 @@
 #include <coreutils/environment.h>
 #include <coreutils/file.h>
 #include <coreutils/log.h>
+#include <coreutils/split.h>
 #include <coreutils/utils.h>
 
 #ifdef WITH_MPG123
@@ -12,6 +13,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 
@@ -59,8 +61,8 @@ std::vector<std::string> getLines(std::string const& text)
 
 bool parseSid(SongInfo& info)
 {
-    static std::vector<uint8_t> buffer(0xd8);
-    File f{info.path};
+    std::array<uint8_t, 0xd8> buffer;
+    File f{ info.path };
     info.format = "Commodore 64";
     f.read(&buffer[0], buffer.size());
     info.title = utils::utf8_encode(get_string(&buffer[0x16], 0x20));
@@ -72,7 +74,7 @@ bool parseSid(SongInfo& info)
 
 bool parseSap(SongInfo& info)
 {
-    File f{info.path};
+    File f{ info.path };
 
     auto data = f.readAll();
 
@@ -104,7 +106,7 @@ bool parseSndh(SongInfo& info)
 {
 
     std::unique_ptr<uint8_t[]> unpackPtr;
-    File f{info.path};
+    File f{ info.path };
     LOGD("SNDH >%s", info.path);
     auto data = f.readAll();
     if (data.size() < 32) return false;
@@ -175,9 +177,8 @@ bool parseSnes(SongInfo& info)
         if (done) continue;
         if (utils::path_extension(s) == "spc") {
             a->extract(s);
-            File f{outDir / s};
+            File f{ outDir / s };
             f.read(&buffer[0], buffer.size());
-            f.close();
             if (buffer[0x23] == 0x1a) {
                 // auto title = std::string((const char*)&buffer[0x2e], 0x20);
                 auto ptr = (const char*)&buffer[0x4e];
@@ -202,6 +203,7 @@ bool parseSnes(SongInfo& info)
                         }
                     }
                 }
+                f.close();
 
                 info.composer = composer;
                 info.game = game;
@@ -247,6 +249,7 @@ bool parseMp3(SongInfo& info)
     mpg123_exit();
     return true;
 #else
+    (void)info;
     return false;
 #endif
 }
@@ -254,7 +257,7 @@ bool parseMp3(SongInfo& info)
 bool parsePList(SongInfo& info)
 {
 
-    File f{info.path};
+    File f{ info.path };
 
     info.title = utils::path_basename(info.path);
     info.composer = "";
@@ -276,7 +279,7 @@ bool parsePList(SongInfo& info)
 
 bool parseNsfe(SongInfo& song)
 {
-    File f{song.path};
+    File f{ song.path };
     if (f.readString(4) != "NSFE") return false;
     while (!f.eof()) {
         auto size = f.read<uint32_t>();
@@ -296,7 +299,7 @@ bool parseNsfe(SongInfo& song)
 static void fixName(std::string& name)
 {
     bool capNext = true;
-    for (int i = 0; i < name.size(); i++) {
+    for (size_t i = 0; i < name.size(); i++) {
         auto& c = name[i];
         if (capNext) {
             c = toupper(c);
@@ -322,9 +325,9 @@ bool identify_song(SongInfo& info, std::string ext)
         auto title = utils::path_basename(parts[l - 1]);
         fixName(title);
         std::string composer = "Unknown";
-        if (parts[0] == "musicians") {
+        if (strcmp(parts[0], "musicians") == 0) {
             composer = parts[1];
-            auto cp = utils::split(composer, "_");
+            std::vector<std::string> cp = utils::split(composer, "_");
             auto cpl = cp.size();
             if (cpl > 1 && cp[0] != "the" && cp[0] != "billy" &&
                 cp[0] != "legion") {
@@ -336,7 +339,7 @@ bool identify_song(SongInfo& info, std::string ext)
                 cpp[0] = toupper(cpp[0]);
             }
 
-            composer = utils::join(cp, " ");
+            composer = utils::join(cp.begin(), cp.end(), " "s);
         }
 
         info.format = "TED";

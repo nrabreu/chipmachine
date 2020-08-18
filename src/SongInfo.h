@@ -12,13 +12,13 @@ struct SongInfo
              const std::string& title = "", const std::string& composer = "",
              const std::string& format = "", const std::string& info = "")
         : path(path), game(game), title(title), composer(composer),
-          format(format), metadata{info, ""}
+          format(format), metadata{ info, "" }
     {
         auto pos = path.find_last_of(';');
         if (pos != std::string::npos) {
             auto s = path.substr(pos + 1);
             if (s.size() < 3) {
-                starttune = stol(s);
+                starttune = stoi(s);
                 this->path = path.substr(0, pos);
             }
         }
@@ -30,7 +30,7 @@ struct SongInfo
         SCREENSHOT
     };
 
-    bool operator==(const SongInfo& other)
+    bool operator==(const SongInfo& other) const
     {
         return path == other.path && starttune == other.starttune;
     }
